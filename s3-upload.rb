@@ -1,10 +1,50 @@
+#!/usr/bin/env ruby
+
+require 'aws-sdk-s3'
+
+# ==========================================
+# Configuration from Environment Variables
+# ==========================================
+
+S3_URL           = ENV.fetch('S3_URL', 'https://storage.googleapis.com')
+S3_KEY           = ENV.fetch('S3_KEY')
+S3_SECRET        = ENV.fetch('S3_SECRET')
+
+BUCKET_NAME      = ENV.fetch('BUCKET_NAME')
+DESTINATION_PATH = ENV.fetch('DESTINATION_PATH')
+SOURCE_PATH      = ENV.fetch('SOURCE_PATH')
+
+S3_REGION        = ENV.fetch('S3_REGION', 'auto')
+
+# ==========================================
+# Validate Source File
+# ==========================================
+
+unless File.file?(SOURCE_PATH)
+  abort "ERROR: Source file not found: #{SOURCE_PATH}"
+end
+
+total_bytes = File.size(SOURCE_PATH)
+
+if total_bytes.zero?
+  abort "ERROR: Source file is empty: #{SOURCE_PATH}"
+end
+
+# ==========================================
+# S3 Client
+# ==========================================
+
+s3 = Aws::S3::Client.new(
+  endpoint: S3_URL,
+  access_key_id: S3_KEY,
+  secret_access_key: S3_SECRET,
+  region: S3_REGION,
+  force_path_style: true
+)
 
 # ==========================================
 # Upload with Progress
 # ==========================================
-
-transferred_bytes = 0
-last_percent = -1
 
 puts "=========================================="
 puts "S3 Upload"
@@ -24,13 +64,13 @@ begin
     bucket: BUCKET_NAME,
     key: DESTINATION_PATH,
     on_chunk_sent: lambda { |bytes_transferred, total_transferred, total_size|
-      transferred_bytes = total_transferred
+      percent = (total_transferred * 100.0 / total_size).to_i
+      percent = [[percent, 0].max, 100].min
 
-      percent = (transferred_bytes * 100.0 / total_size).to_i
-      percent = [percent, 100].min
+      @last_percent ||= -1
 
-      if percent != last_percent
-        mb_done = transferred_bytes / 1024.0 / 1024.0
+      if percent != @last_percent
+        mb_done = [total_transferred, total_size].min / 1024.0 / 1024.0
         mb_total = total_size / 1024.0 / 1024.0
 
         bar_width = 30
@@ -42,7 +82,7 @@ begin
         ]
 
         $stdout.flush
-        last_percent = percent
+        @last_percent = percent
       end
     }
   )
